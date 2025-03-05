@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D3 Org Chart</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-org-chart@3.0.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-flextree@2.1.2/build/d3-flextree.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+        }
+        .chart-container {
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* Add these new styles */
+        #sidebar {
+            width: 400px;
+            min-width: 200px;
+            max-width: 800px;
+            background: #f5f5f5;
+            border-left: 1px solid #ddd;
+            height: 100vh;
+            box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+            position: fixed;
+            right: 0;
+            top: 0;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 1000;
+        }
+
+        #sidebar.visible {
+            transform: translateX(0);
+        }
+
+        #close-sidebar {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            cursor: pointer;
+            font-size: 24px;
+            color: #666;
+            background: none;
+            border: none;
+            padding: 0;
+            z-index: 2;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: background-color 0.2s;
+        }
+
+        #close-sidebar:hover {
+            color: #333;
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+
+        #sidebar-content {
+            padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #sidebarTitle {
+            margin-top: 0;
+            margin-bottom: 20px;
+            padding-right: 30px;
+            position: sticky;
+            top: 0;
+            background: #f5f5f5;
+            padding-top: 20px;
+            z-index: 1;
+        }
+
+        #sidebarContent {
+            flex: 1;
+            overflow-y: auto;
+            padding-right: 10px;
+        }
+
+        /* Table styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            table-layout: fixed;
+        }
+
+        th, td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        td {
+            vertical-align: top;
+        }
+
+        th {
+            background-color: #fff;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        th:nth-child(1) { width: 20%; }
+        th:nth-child(2) { width: 25%; }
+        th:nth-child(3) { width: 15%; }
+        th:nth-child(4) { width: 40%; }
+
+        .text-muted {
+            color: #666;
+            font-size: 0.85em;
+        }
+
+        .node {
+            cursor: pointer;
+        }
+
+        .node.selected rect {
+            stroke: #2196F3;
+            stroke-width: 2px;
+        }
+
+        /* Add these resize-related styles */
+        #sidebar-resizer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            cursor: ew-resize;
+            background: transparent;
+        }
+
+        #sidebar-resizer:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        /* Add these search-related styles */
+        #search-container {
+            margin: 10px 0;
+            padding: 0 0 10px 0;
+            position: sticky;
+            top: 60px;
+            background: #f5f5f5;
+            z-index: 1;
+        }
+
+        #employeeSearch {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            box-sizing: border-box;
+        }
+
+        #employeeSearch:focus {
+            outline: none;
+            border-color: #2196F3;
+            box-shadow: 0 0 3px rgba(33, 150, 243, 0.3);
+        }
+
+        tr.hidden {
+            display: none;
+        }
+
+        .highlight {
+            background-color: yellow;
+            padding: 2px;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="chart-container"></div>
+    
+    <!-- Add sidebar HTML -->
+    <div id="sidebar">
+        <div id="sidebar-resizer"></div>
+        <button id="close-sidebar" onclick="closeSidebar()">×</button>
+        <div id="sidebar-content">
+            <h3 id="sidebarTitle">Select a department</h3>
+            <div id="search-container">
+                <input 
+                    type="text" 
+                    id="employeeSearch" 
+                    placeholder="Search employees..."
+                    onkeyup="filterEmployees()"
+                >
+            </div>
+            <div id="sidebarContent"></div>
+        </div>
+    </div>
+
+    <script src="org_chart_data.js"></script>
+    <script>
+        // Add this list at the top of your script
+        const highlightedOffices = [
+            "Operations",
+            "Field Operations",
+            "OFFICE OF GOVERNMENT CONTRACTING & BUSINESS DEVELOPMENT",
+            "PERSONNEL SECURITY DIVISION",
+            // "Office of Financial Assistance",
+            // "Office of Performance and Systems Management",
+            // "Office of Credit Risk Management",
+            // "Office of Surety Guarantees",
+            // "7(a)",
+            // "504 Program",
+            // "Secondary Market (SMG)",
+            // "Microloan Enterprise Development"
+            // Add more office names here
+        ];
+
+        function transformOrgData(node, parentId = "", prefix = "") {
+            let result = [];
+            
+            // Create current node
+            const currentId = prefix ? `${prefix}-${node.name}` : node.name;
+            const currentNode = {
+                id: currentId,
+                parentId: parentId,
+                name: node.name,
+                position: `${node.name}`,
+                employeeCount: node.employees.length,
+                totalEmployees: node.employees.length // We'll add children's employees later
+            };
+            
+            // Add current node to results
+            result.push(currentNode);
+            
+            // Process children
+            if (node.children && node.children.length > 0) {
+                node.children.forEach((child, index) => {
+                    const childResults = transformOrgData(child, currentId, `${prefix}${index}`);
+                    
+                    // Add children's employees to total
+                    childResults.forEach(childNode => {
+                        if (childNode.parentId === currentId) {
+                            currentNode.totalEmployees += childNode.totalEmployees;
+                        }
+                    });
+                    
+                    result = result.concat(childResults);
+                });
+            }
+            
+            return result;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Transform the data
+            const transformedData = transformOrgData(data);
+            console.log("Transformed data:", transformedData);
+
+            const chart = new d3.OrgChart()
+                .container('.chart-container')
+                .nodeHeight(d => {
+                    // Create a temporary div to measure the actual content height
+                    const temp = document.createElement('div');
+                    temp.style.position = 'absolute';
+                    temp.style.visibility = 'hidden';
+                    temp.style.width = '220px'; // Fixed width
+                    temp.style.padding = '12px';
+                    temp.style.boxSizing = 'border-box'; // Include padding in width calculation
+                    temp.style.border = '1px solid #E4E2E9';
+                    temp.style.borderRadius = '5px';
+                    temp.innerHTML = `
+                        <div style="font-weight:bold;margin-bottom:5px;word-wrap:break-word;">${d.data.name}</div>
+                        <div style="color:#716E7B;font-size:12px">${d.data.position}</div>
+                        <div style="color:#716E7B;font-size:12px">Team Size: ${d.data.totalEmployees}</div>
+                    `;
+                    document.body.appendChild(temp);
+                    const height = temp.offsetHeight;
+                    document.body.removeChild(temp);
+                    return height; // Remove extra padding - let the actual height be the container height
+                })
+                .nodeWidth(d => 220)
+                .childrenMargin(d => 50)
+                .compactMarginBetween(d => 35)
+                .compact(false)
+                .neighbourMargin((a, b) => 50)
+                .siblingsMargin(d => 60)
+                .nodeContent((d, i, arr, state) => {
+                    // Check if this node's name is in the highlighted offices list
+                    const isHighlighted = highlightedOffices.includes(d.data.name);
+                    const backgroundColor = isHighlighted ? '#e6ffe6' : 'white'; // Light green if highlighted
+                    const borderColor = isHighlighted ? '#90EE90' : '#E4E2E9';  // Lighter green border if highlighted
+
+                    return `
+                        <div style="
+                            height: ${d.height}px;
+                            width: ${d.width}px;
+                            padding: 12px;
+                            background-color: ${backgroundColor};
+                            border: 1px solid ${borderColor};
+                            border-radius: 5px;
+                            box-sizing: border-box;
+                            display: flex;
+                            flex-direction: column;
+                            cursor: pointer;
+                        " onclick="showSidebar('${d.data.name}', ${d.data.totalEmployees})">
+                            <div style="font-weight:bold;margin-bottom:5px;word-wrap:break-word;">${d.data.name}</div>
+                            <div style="color:#716E7B;font-size:12px">${d.data.position}</div>
+                            <div style="color:#716E7B;font-size:12px">Team Size: ${d.data.totalEmployees}</div>
+                        </div>
+                    `;
+                });
+
+            chart
+                .data(transformedData)
+                .render();
+
+            // Start with everything collapsed except root
+            setTimeout(() => {
+                const root = chart.getChartState().data[0];
+                chart.collapseAll();
+                chart.expandNode(root.id).render();
+            }, 100);
+        });
+
+        // Add these new functions
+        function getAllEmployeesFromNode(node) {
+            let employees = [];
+            
+            // Add direct employees if they exist
+            if (node.employees && node.employees.length > 0) {
+                employees = employees.concat(
+                    node.employees.map(emp => ({
+                        ...emp,
+                        office: node.name
+                    }))
+                );
+            }
+            
+            // Recursively get employees from children
+            if (node.children) {
+                node.children.forEach(child => {
+                    employees = employees.concat(getAllEmployeesFromNode(child));
+                });
+            }
+            
+            return employees;
+        }
+
+        let currentEmployees = []; // Store current employees for filtering
+
+        // Modify showSidebar function to include search functionality
+        function showSidebar(name, totalEmployees) {
+            // Remove selected class from all nodes
+            d3.selectAll('.node').classed('selected', false);
+            
+            // Add selected class to clicked node
+            const clickedNode = d3.select(event.target.closest('.node'));
+            clickedNode.classed('selected', true);
+
+            const sidebar = document.getElementById("sidebar");
+            const sidebarTitle = document.getElementById("sidebarTitle");
+            const sidebarContent = document.getElementById("sidebarContent");
+
+            // Find the node data
+            const nodeData = findNodeByName(data, name);
+            currentEmployees = getAllEmployeesFromNode(nodeData);
+            
+            sidebarTitle.textContent = `${name} (${currentEmployees.length} total employees)`;
+            
+            // Clear search input when showing new department
+            const searchInput = document.getElementById("employeeSearch");
+            searchInput.value = '';
+            
+            renderEmployeeTable(currentEmployees);
+            
+            sidebar.classList.add("visible");
+        }
+
+        // Helper function to find node by name
+        function findNodeByName(node, name) {
+            if (node.name === name) {
+                return node;
+            }
+            if (node.children) {
+                for (const child of node.children) {
+                    const found = findNodeByName(child, name);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+
+        function closeSidebar() {
+            const sidebar = document.getElementById("sidebar");
+            sidebar.classList.remove("visible");
+            // Remove selected state from nodes
+            d3.selectAll('.node').classed('selected', false);
+        }
+
+        // Add click outside to close
+        document.addEventListener('mousedown', function(e) {
+            const sidebar = document.getElementById("sidebar");
+            const clickedNode = e.target.closest('.node');
+            if (sidebar.classList.contains('visible') && 
+                !sidebar.contains(e.target) && 
+                !clickedNode) {
+                closeSidebar();
+            }
+        });
+
+        // Add resize functionality
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('sidebar-resizer');
+        let isResizing = false;
+        let startX;
+        let startWidth;
+
+        resizer.addEventListener('mousedown', initResize, false);
+
+        function initResize(e) {
+            isResizing = true;
+            startX = e.clientX;
+            startWidth = parseInt(document.defaultView.getComputedStyle(sidebar).width, 10);
+            
+            document.addEventListener('mousemove', resize, false);
+            document.addEventListener('mouseup', stopResize, false);
+            e.preventDefault(); // Prevent text selection while dragging
+        }
+
+        function resize(e) {
+            if (!isResizing) return;
+            
+            const width = startWidth - (e.clientX - startX);
+            if (width >= 200 && width <= 800) { // Min and max width limits
+                sidebar.style.width = width + 'px';
+            }
+        }
+
+        function stopResize() {
+            isResizing = false;
+            document.removeEventListener('mousemove', resize, false);
+            document.removeEventListener('mouseup', stopResize, false);
+        }
+
+        // Add these new functions
+        function filterEmployees() {
+            const searchTerm = document.getElementById("employeeSearch").value.toLowerCase();
+            const rows = document.querySelectorAll('.employee-row');
+            let visibleCount = 0;
+
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    row.classList.remove('hidden');
+                    visibleCount++;
+                    
+                    // Highlight matching text if there's a search term
+                    if (searchTerm) {
+                        highlightText(row, searchTerm);
+                    } else {
+                        // Remove highlights if search is cleared
+                        removeHighlights(row);
+                    }
+                } else {
+                    row.classList.add('hidden');
+                }
+            });
+
+            // Update title with filter count
+            const sidebarTitle = document.getElementById("sidebarTitle");
+            const totalEmployees = currentEmployees.length;
+            if (searchTerm) {
+                sidebarTitle.textContent = `${visibleCount} of ${totalEmployees} employees shown`;
+            } else {
+                sidebarTitle.textContent = `${totalEmployees} total employees`;
+            }
+        }
+
+        function highlightText(element, searchTerm) {
+            removeHighlights(element);
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+            let node;
+            while (node = walker.nextNode()) {
+                const text = node.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    const newNode = document.createElement('span');
+                    const regex = new RegExp(`(${searchTerm})`, 'gi');
+                    newNode.innerHTML = node.textContent.replace(regex, '<span class="highlight">$1</span>');
+                    node.parentNode.replaceChild(newNode, node);
+                }
+            }
+        }
+
+        function removeHighlights(element) {
+            const highlights = element.querySelectorAll('.highlight');
+            highlights.forEach(highlight => {
+                const parent = highlight.parentNode;
+                parent.replaceChild(document.createTextNode(highlight.textContent), highlight);
+                // Clean up any empty spans
+                if (parent.tagName === 'SPAN' && !parent.innerHTML.trim()) {
+                    parent.parentNode.removeChild(parent);
+                }
+            });
+        }
+
+        function renderEmployeeTable(employees) {
+            let table = '<table>';
+            table += `
+                <tr>
+                    <th>Name (ID)</th>
+                    <th>Position</th>
+                    <th>Office</th>
+                    <th>Details</th>
+                </tr>`;
+            
+            // Sort employees by office name
+            employees.sort((a, b) => a.office.localeCompare(b.office));
+            
+            employees.forEach(emp => {
+                let union_status_string = emp.union_status === 8888 || emp.union_status === 7777 ? "Union" : "Non-union";
+                table += `
+                    <tr class="employee-row">
+                        <td>${emp.name}<br><small class="text-muted">#${emp.id}</small></td>
+                        <td>
+                            ${emp.position.title}<br>
+                            <small class="text-muted">Position #${emp.position.number}</small>
+                        </td>
+                        <td>${emp.office}</td>
+                        <td>
+                            <strong>Type:</strong> ${emp.type}<br>
+                            <strong>Union:</strong> ${union_status_string}<br>
+                            <strong>Location:</strong> ${emp.location}<br>
+                            <strong>Appt Type:</strong> ${emp.satisfaction}/5<br>
+                            <strong>Supervisor:</strong> ${emp.supervisor.name}<br>
+                            <small class="text-muted">Supervisor ID: ${emp.supervisor.id}</small>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            table += '</table>';
+            sidebarContent.innerHTML = table;
+        }
+    </script>
+</body>
+</html>
